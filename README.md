@@ -1,6 +1,3 @@
-Вот вариант заготовки `README.md` для твоего репозитория. Скопируй его в файл `README.md` в корне проекта.
-
-```markdown
 # Riemannian RL: Geodesic Glider on 3D Manifolds
 
 Исследовательский проект по обучению агентов методом Reinforcement Learning (PPO) на неевклидовых пространствах и римановых многообразиях с кривизной.
@@ -40,40 +37,3 @@
 │   └── rl/           # Алгоритм PPO, буфер и функции потерь
 ├── scripts/          # Скрипты для запуска обучения и рендеринга
 └── tests/            # Модульные тесты (PyTest) для проверки математики
-
-```
-
----
-
-## 🚀 Быстрый старт
-
-### 1. Клонирование и установка окружения
-
-```bash
-git clone git@github.com:DmitrGl/RiemannianRL.git
-cd RiemannianRL
-
-# Активация виртуального окружения через pyenv
-pyenv local riemann-env
-
-# Установка зависимостей
-pip install -r requirements.txt
-
-```
-
-### 2. Запуск обучения (WIP)
-
-```bash
-python scripts/train.py --manifold sphere
-
-```
-
----
-
-## 📜 Лицензия
-
-MIT License
-
-```
-
-```
