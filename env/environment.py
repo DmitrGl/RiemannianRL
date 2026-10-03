@@ -30,8 +30,8 @@ class GeodesicGliderEnv(gym.Env):
         # observation is dict {glider: [u, v, v_u, v_v], target: [u, v, v_u, v_v]}
         self.observation_space = gym.spaces.Dict(
             {
-                "glider": gym.spaces.Box(low= np.array([-np.inf, -np.inf, -np.inf, -np.inf]),high= np.array([np.inf, np.inf, np.inf, np.inf]), dtype= np.float32 ),
-                "target": gym.spaces.Box(low= np.array([-np.inf, -np.inf, -np.inf, -np.inf]),high= np.array([np.inf, np.inf, np.inf, np.inf]), dtype= np.float32 ),
+                "glider": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32),
+                "target": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32),
             }
         )
         # action is vector [a_u, a_v]
@@ -150,14 +150,18 @@ class GeodesicGliderEnv(gym.Env):
         To calculate estimated distance between glider and target we divide the line segment in R^3 into N points,
         Map each point onto the manifold via r(u,v), and sum Euclidean distances between consecutive 3D points
         """
-        g_pos = self.r(self.glider_state[0:2])
-        t_pos = self.r(self.target_state[0:2])
+        ug,vg = self.glider_state[0], self.glider_state[1]
+        ut,vt = self.target_state[0], self.target_state[1]
+        g_pos = self.r(ug,vg)
+        t_pos = self.r(ut,vt)
         v = (t_pos - g_pos)/(N-1)
         points = np.zeros((N,3))
         dist = 0
         for i in range(N):
-            points[i] = g_pos + i*v
-            points[i] = self.r(points[i][0:2])
+            cur = g_pos + i*v
+            points[i] = cur.reshape(-1)
+            cur = self.r(points[i][0], points[i][1])
+            points[i] = cur.reshape(-1)
             if i > 0:
                 dist += np.linalg.norm(points[i]-points[i-1])
         return dist
