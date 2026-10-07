@@ -73,6 +73,8 @@ class GeodesicGliderEnv(gym.Env):
         self.christoffel_funcs = sp.lambdify(cords, Gamma)
         self.cords = cords
         self.r = sp.lambdify(cords, r_manifold)
+        self.r_u = sp.lambdify(cords, r_u)
+        self.r_v = sp.lambdify(cords, r_v)
 
     def _compute_derivatives(self, state, action):
         """
@@ -102,7 +104,7 @@ class GeodesicGliderEnv(gym.Env):
         S_next = state + (k1+2*k2+2*k3+k4)*dt/6
         return S_next
     
-    def _action_to_coordinate_acceleration(self, state, action):
+    def _change_basis_in_tangent_space(self, state, vector, reverse = False):
         """
         Action acceleration vector lies in orthonormal basis (so that equal actions would imply equal acceleration),
         But we need to compute this vector in the tangent space coordinate basis
@@ -110,17 +112,23 @@ class GeodesicGliderEnv(gym.Env):
         Orthonormal basis : (e1,e2) = (f1/sqrt(<f1,f1>) , (f2 - alpha*f1)/sqrt(<e2,e2>))
         alpha = <f1,f2>/<f1,f1> 
         So we have a*e1 + b*e2 and we need coordinate components x*f1 + y*f2
+        if reverse flag is True, we should compute inverse change of basis (from x*f1 + y*f2 to a*e1 + b*e2)
         """
         u,v = state[0],state[1]
         g = self.g(u,v)
         alpha = g[0,1]/g[0,0]
         e2_norm = np.sqrt(g[1,1] -2*alpha*g[0,1] + alpha*alpha*g[0,0])
-        a,b = action[0], action[1]
-        y = b/e2_norm
-        x = a/np.sqrt(g[0,0]) - b*alpha/e2_norm
-        return np.array([x,y])
-
-    
+        if(reverse == False):
+            a,b = vector[0], vector[1]
+            y = b/e2_norm
+            x = a/np.sqrt(g[0,0]) - b*alpha/e2_norm
+            return np.array([x,y])
+        else:
+            x,y = vector[0], vector[1]
+            a = (x+alpha*y)*np.sqrt(g[0,0])
+            b = y*e2_norm
+            return np.array([a,b])
+            
     def step(self, action):
         """
         Execute one simulation step:
@@ -130,20 +138,30 @@ class GeodesicGliderEnv(gym.Env):
 
         Returns: (observation, reward, terminated, truncated, info)
         """
-        action = self._action_to_coordinate_acceleration(self.glider_state, action)
+        action = self._change_basis_in_tangent_space(self.glider_state, action)
         self.glider_state = self._rk4_step(self.glider_state, action, 0.01)
         self.target_state = self._rk4_step(self.target_state, np.array([0,0]), 0.01)
 
-        obs = {
-            "glider": self.glider_state, 
-            "target": self.target_state
-        }
+        obs = self._get_observation()
         reward = self._get_reward()
         terminated = False  
         truncated = False   
         info = {}           
         return obs, reward, terminated, truncated, info
     
+    def _global_velocity_vector (self, state):
+        """
+        Vector V = (V_x, V_y, V_z) - velocity vector (v_u, v_v) in R^3 space
+        dr/dt = dr/du * du/dt + dr/dv * dv/dt
+        """
+        u,v = state[0], state[1]
+        dudt, dvdt = state[2], state[3]
+        r_u_vec = np.array(self.r_u(u, v), dtype=np.float32).reshape(-1)
+        r_v_vec = np.array(self.r_v(u, v), dtype=np.float32).reshape(-1)
+
+        V = r_u_vec * dudt + r_v_vec * dvdt
+        return V
+
 
     def _calculate_distance(self, N):
         """
@@ -166,8 +184,24 @@ class GeodesicGliderEnv(gym.Env):
                 dist += np.linalg.norm(points[i]-points[i-1])
         return dist
         
+    def _get_observation(self):
+        """
+        Transforms velocity vectors from tangent space coordinate basis (du/dt, dv/dt)
+        to orthonormal basis (e1, e2) for policy model observation.
+        """
+        glider = self.glider_state
+        target = self.target_state
 
-
+        # Convert velocity components from coordinate basis to orthonormal basis
+        g_v = self._change_basis_in_tangent_space(glider, glider[2:4], True)
+        t_v = self._change_basis_in_tangent_space(target, target[2:4], True)
+        
+        obs = {
+            "glider": np.array([glider[0],glider[1],g_v[0],g_v[1]]), 
+            "target": np.array([target[0],target[1],t_v[0],t_v[1]])
+        }
+        return obs
+    
     def _get_reward(self):
         """
         Reward function: reward model for getting closer to the target, punish for moving further away and for time passed.
@@ -178,7 +212,7 @@ class GeodesicGliderEnv(gym.Env):
         return delta - 0.01
 
     
-    def reset(self, seed = 42, options = (0,1,10)):
+    def reset(self, seed = None, options = None):
         """
         Reset environment to initial state.
         Randomly generates initial positions and velocities for glider and target.
@@ -186,17 +220,18 @@ class GeodesicGliderEnv(gym.Env):
         Returns: (observation, info)
         """
         rng = np.random.default_rng(seed)
-        mu, sigma2, N = options[0:3]
+        mu = options.get('mu', 0) if options else 0
+        sigma2 = options.get('sigma2', 0) if options else 1
+        N = options.get('N', 0) if options else 10
         self.N = N
         self.glider_state = rng.normal(mu,sigma2,4)
         self.target_state = rng.normal(mu,sigma2,4)
         self.previous_distance = self._calculate_distance(N)
         
         self.rng = rng
-        obs = {
-            "glider": self.glider_state, 
-            "target": self.target_state
-        }
+        obs = self._get_observation()
+        
+         
         info = {}     
         return obs, info
 

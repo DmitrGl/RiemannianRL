@@ -89,26 +89,22 @@ def test_action_isometry(env):
     print("  [~] Running action isometry (norm preservation) tests...")
     
     env.reset(seed=10)
-    # Pick a random state on the paraboloid
     state = env.glider_state
     u, v = state[0], state[1]
     
-    # Define an arbitrary thrust action
     action = np.array([0.8, -0.6]) # Euclidean norm is 1.0
     action_norm_squared = action[0]**2 + action[1]**2
     
-    # Map to tangent space coordinate basis
-    coord_accel = env._action_to_coordinate_acceleration(state, action)
+    coord_accel = env._change_basis_in_tangent_space(state, action, reverse=False)
     x, y = coord_accel[0], coord_accel[1]
     
-    # Calculate length of mapped vector using the metric tensor g_{ij}
     g = env.g(u, v)
     mapped_norm_squared = g[0][0]*x**2 + 2*g[0][1]*x*y + g[1][1]*y**2
     
     np.testing.assert_allclose(
         action_norm_squared, 
         mapped_norm_squared, 
-        err_msg="action vector norm is not preserved after basis transformation. Orthonormal basis is incorrect."
+        err_msg="action vector norm is not preserved after basis transformation."
     )
     print("  [OK] Action isometry passed.")
 
@@ -124,17 +120,17 @@ def test_rk4_geodesic_stability(env):
     env.glider_state = np.array([1.0, 1.0, 0.0, 0.0], dtype=np.float32)
     zero_action = np.array([0.0, 0.0], dtype=np.float32)
     obs, _, _, _, _ = env.step(zero_action)
+    
     np.testing.assert_allclose(
-        obs["glider"], 
+        env.glider_state, 
         [1.0, 1.0, 0.0, 0.0], 
         err_msg="glider with 0 velocity and 0 thrust must not move"
     )
 
-    # Test 2: Constant velocity on flat plane (geodesic in Euclidean space)
+    # Test 2: Constant velocity on flat plane
     flat_env = create_flat_env()
     flat_env.reset() 
     
-
     flat_env.glider_state = np.array([0.0, 0.0, 2.0, 3.0], dtype=np.float32)
     flat_env.target_state = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32)
     
@@ -164,7 +160,6 @@ def test_distance_and_reward_logic(env):
     """
     print("  [~] Running distance and reward bounds tests...")
     
-    # On a flat manifold, environment distance calculation should perfectly match 3D Euclidean distance
     flat_env = create_flat_env()
     flat_env.reset()
     flat_env.glider_state = np.array([0.0, 0.0, 0.0, 0.0])
@@ -175,16 +170,12 @@ def test_distance_and_reward_logic(env):
     
     # Test reward logic: getting closer
     flat_env.previous_distance = 5.0
-    
-    # Manually move glider closer to target (to [3.0, 3.0])
     flat_env.glider_state = np.array([3.0, 3.0, 0.0, 0.0])
     flat_env.target_state = np.array([3.0, 4.0, 0.0, 0.0])
     
-    new_dist = flat_env._calculate_distance(N=10) # Should be 1.0
     expected_delta = 5.0 - 1.0 # previous - current
     expected_reward = expected_delta - 0.01
     
-    # Bypass step() and call _get_reward directly to isolate logic
     flat_env.N = 10
     actual_reward = flat_env._get_reward()
     np.testing.assert_allclose(actual_reward, expected_reward, err_msg="reward function did not return expected delta minus time penalty")
@@ -192,7 +183,7 @@ def test_distance_and_reward_logic(env):
 
     # Test reward logic: getting further away
     flat_env.previous_distance = 1.0
-    flat_env.glider_state = np.array([0.0, 0.0, 0.0, 0.0]) # teleport back to origin
+    flat_env.glider_state = np.array([0.0, 0.0, 0.0, 0.0])
     flat_env.target_state = np.array([3.0, 4.0, 0.0, 0.0])
     
     actual_negative_reward = flat_env._get_reward()
@@ -202,21 +193,80 @@ def test_distance_and_reward_logic(env):
 
 def test_reset_options_parsing(env):
     """
-    Ensures that the environment correctly parses the options tuple passed to reset().
-    options = (mu, sigma2, N)
+    Ensures that reset() correctly parses options as a dictionary:
+    options = {'mu': ..., 'sigma2': ..., 'N': ...}
+    Also checks default values when options is None.
     """
-    print("  [~] Running reset options tests...")
+    print("  [~] Running reset options dictionary tests...")
     
+    # 1. Custom options dictionary
     mu_test, sigma_test, N_test = 100.0, 0.001, 50
-    obs, _ = env.reset(seed=777, options=(mu_test, sigma_test, N_test))
+    options_dict = {'mu': mu_test, 'sigma2': sigma_test, 'N': N_test}
+    env.reset(seed=777, options=options_dict)
     
-    # Glider and target states should be initialized close to 'mu' since sigma is tiny
-    for val in obs["glider"]:
-        assert 99.0 < val < 101.0, f"state initialized far from mu={mu_test} despite tiny variance"
+    for val in env.glider_state:
+        assert 99.0 < val < 101.0, f"internal state initialized far from mu={mu_test}. Got: {val}"
         
-    assert env.N == N_test, "environment did not update N parameter from options tuple"
+    assert env.N == N_test, f"environment N parameter should be {N_test}, got {env.N}"
     
-    print("  [OK] Reset options passed.")
+    # 2. Default options (options=None)
+    env.reset(seed=42)
+    assert env.N == 10, f"default N parameter should be 10 when options is None, got {env.N}"
+    
+    print("  [OK] Reset options dictionary passed.")
+
+def test_observation_velocity_norm(env):
+    """
+    Validates that the velocity vector norm in orthonormal observation space 
+    equals the Riemannian norm of velocity in coordinate space.
+    """
+    print("  [~] Running observation velocity basis tests...")
+    env.reset(seed=42)
+    
+    env.glider_state = np.array([1.0, 1.0, 2.0, -1.5], dtype=np.float32)
+    
+    u, v = env.glider_state[0], env.glider_state[1]
+    g = env.g(u, v)
+    v_u, v_v = env.glider_state[2], env.glider_state[3]
+    riemannian_speed = np.sqrt(g[0,0]*v_u**2 + 2*g[0,1]*v_u*v_v + g[1,1]*v_v**2)
+    
+    obs = env._get_observation()
+    obs_v = obs["glider"][2:4]
+    euclidean_speed_in_ortho_basis = np.linalg.norm(obs_v)
+    
+    np.testing.assert_allclose(
+        euclidean_speed_in_ortho_basis, 
+        riemannian_speed, 
+        err_msg="velocity norm in orthonormal observation must equal Riemannian norm in coordinate space"
+    )
+    assert obs["glider"].dtype == np.float32, "observation array dtype must be float32"
+    print("  [OK] Observation velocity basis passed.")
+
+def test_global_velocity_vector(env, flat_env):
+    """
+    Validates shape, dtype, and numerical correctness of the 3D velocity vector V = dr/dt in R^3.
+    """
+    print("  [~] Running 3D global velocity vector tests...")
+    
+    # 1. Shape and Dtype checks
+    state = np.array([1.0, 1.0, 2.0, 3.0], dtype=np.float32)
+    V = env._global_velocity_vector(state)
+    
+    assert isinstance(V, np.ndarray), "velocity vector must be np.ndarray"
+    assert V.shape == (3,), f"expected shape (3,), got {V.shape}"
+    assert V.dtype == np.float32, f"expected dtype float32, got {V.dtype}"
+    
+    # 2. Analytical check on flat plane (z = 0)
+    # r(u,v) = (u, v, 0) => V = (v_u, v_v, 0)
+    flat_env.reset(seed=42)
+    V_flat = flat_env._global_velocity_vector(state)
+    np.testing.assert_allclose(
+        V_flat, 
+        [2.0, 3.0, 0.0], 
+        err_msg="global velocity vector on flat plane must equal [v_u, v_v, 0.0]"
+    )
+    
+    print("  [OK] 3D global velocity vector passed.")
 
 def main():
     print("="*60)
@@ -241,6 +291,8 @@ def main():
     test_rk4_geodesic_stability(paraboloid_env)
     test_distance_and_reward_logic(paraboloid_env)
     test_reset_options_parsing(paraboloid_env)
+    test_observation_velocity_norm(paraboloid_env)
+    test_global_velocity_vector(paraboloid_env, flat_env)
     
     print("\n" + "="*60)
     print("ALL TESTS PASSED SUCCESSFULLY.")
