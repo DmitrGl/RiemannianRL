@@ -27,11 +27,14 @@ class GeodesicGliderEnv(gym.Env):
         self.target_state = np.array([0, 0, 0, 0], dtype= np.float32)
         self.previous_distance = 0
 
-        # observation is dict {glider: [u, v, v_u, v_v], target: [u, v, v_u, v_v]}
+        # observation is dict 
+        # {loval_state: [u1, v1, v1_u, v1_v,   u2, v2, v2_u, v2_v],
+        #  global_state: [x1, y1, z1, v1_x, v1_y, v1_z,   x2, y2, z2, v2_x, v2_y, v2_z]}
+        # where 1 - glider, 2 - target
         self.observation_space = gym.spaces.Dict(
             {
-                "glider": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32),
-                "target": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32),
+                "local_state": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32),
+                "global_state": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(12,), dtype=np.float32),
             }
         )
         # action is vector [a_u, a_v]
@@ -191,14 +194,24 @@ class GeodesicGliderEnv(gym.Env):
         """
         glider = self.glider_state
         target = self.target_state
+        
+        V_g = self._global_velocity_vector(glider)
+        V_t = self._global_velocity_vector(target)
 
         # Convert velocity components from coordinate basis to orthonormal basis
         g_v = self._change_basis_in_tangent_space(glider, glider[2:4], True)
         t_v = self._change_basis_in_tangent_space(target, target[2:4], True)
+
+        glider = np.array([glider[0],glider[1],g_v[0],g_v[1]])
+        target = np.array([target[0],target[1],t_v[0],t_v[1]])
+        
+        g_pos = np.array(self.r(glider[0],glider[1])).reshape(-1)
+        t_pos = np.array(self.r(target[0],target[1])).reshape(-1)
+
         
         obs = {
-            "glider": np.array([glider[0],glider[1],g_v[0],g_v[1]]), 
-            "target": np.array([target[0],target[1],t_v[0],t_v[1]])
+            "local_state": np.concatenate([glider, target]).astype(np.float32),
+            "global_state": np.concatenate([g_pos,V_g,t_pos,V_t]).astype(np.float32)
         }
         return obs
     

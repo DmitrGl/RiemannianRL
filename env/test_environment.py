@@ -35,14 +35,25 @@ def test_gym_api_compliance(env):
     assert env.action_space.shape == (2,), "action_space shape must be (2,)"
     
     assert isinstance(env.observation_space, gym.spaces.Dict), "observation_space must be Dict"
-    for key in ["glider", "target"]:
-        assert key in env.observation_space.spaces, f"observation_space missing {key}"
-        assert env.observation_space.spaces[key].shape == (4,), f"{key} shape must be (4,)"
+    
+    expected_shapes = {
+        "local_state": (8,),
+        "global_state": (12,)
+    }
+    
+    for key, expected_shape in expected_shapes.items():
+        assert key in env.observation_space.spaces, f"observation_space missing key: '{key}'"
+        assert env.observation_space.spaces[key].shape == expected_shape, (
+            f"space '{key}' shape mismatch: expected {expected_shape}, got {env.observation_space.spaces[key].shape}"
+        )
+        assert env.observation_space.spaces[key].dtype == np.float32, f"space '{key}' dtype must be float32"
     
     # 2. Check Reset returns
     obs, info = env.reset(seed=42)
     assert isinstance(obs, dict), "reset() must return a dictionary observation"
     assert isinstance(info, dict), "reset() must return an info dictionary"
+    assert obs["local_state"].shape == (8,), f"reset() local_state shape must be (8,), got {obs['local_state'].shape}"
+    assert obs["global_state"].shape == (12,), f"reset() global_state shape must be (12,), got {obs['global_state'].shape}"
     
     # 3. Check Step returns
     action = np.array([0.5, -0.5], dtype=np.float32)
@@ -63,7 +74,6 @@ def test_flat_manifold_kinematics(env):
     """
     print("  [~] Running flat manifold kinematics tests...")
     
-    # Evaluate at an arbitrary point (u=5, v=-3)
     u_val, v_val = 5.0, -3.0
     
     # 1. Metric Tensor (First Fundamental Form)
@@ -119,7 +129,7 @@ def test_rk4_geodesic_stability(env):
     # Test 1: Static stability
     env.glider_state = np.array([1.0, 1.0, 0.0, 0.0], dtype=np.float32)
     zero_action = np.array([0.0, 0.0], dtype=np.float32)
-    obs, _, _, _, _ = env.step(zero_action)
+    env.step(zero_action)
     
     np.testing.assert_allclose(
         env.glider_state, 
@@ -217,10 +227,12 @@ def test_reset_options_parsing(env):
 
 def test_observation_velocity_norm(env):
     """
-    Validates that the velocity vector norm in orthonormal observation space 
-    equals the Riemannian norm of velocity in coordinate space.
+    Validates that:
+    1. Velocity norm in local_state (orthonormal basis) equals Riemannian norm in coordinate space.
+    2. Velocity norm in global_state (3D Euclidean space R^3) equals Riemannian norm.
+    3. Both observation keys have dtype float32.
     """
-    print("  [~] Running observation velocity basis tests...")
+    print("  [~] Running observation velocity basis and 3D consistency tests...")
     env.reset(seed=42)
     
     env.glider_state = np.array([1.0, 1.0, 2.0, -1.5], dtype=np.float32)
@@ -231,16 +243,30 @@ def test_observation_velocity_norm(env):
     riemannian_speed = np.sqrt(g[0,0]*v_u**2 + 2*g[0,1]*v_u*v_v + g[1,1]*v_v**2)
     
     obs = env._get_observation()
-    obs_v = obs["glider"][2:4]
-    euclidean_speed_in_ortho_basis = np.linalg.norm(obs_v)
     
+    # 1. Check local_state (indices 2:4 are glider velocity in e1, e2 basis)
+    local_obs_v = obs["local_state"][2:4]
+    ortho_speed = np.linalg.norm(local_obs_v)
     np.testing.assert_allclose(
-        euclidean_speed_in_ortho_basis, 
+        ortho_speed, 
         riemannian_speed, 
-        err_msg="velocity norm in orthonormal observation must equal Riemannian norm in coordinate space"
+        err_msg="velocity norm in orthonormal basis (local_state) must equal Riemannian norm"
     )
-    assert obs["glider"].dtype == np.float32, "observation array dtype must be float32"
-    print("  [OK] Observation velocity basis passed.")
+    
+    # 2. Check global_state (indices 3:6 are glider 3D velocity V_g in R^3)
+    V_g = obs["global_state"][3:6]
+    speed_in_r3 = np.linalg.norm(V_g)
+    np.testing.assert_allclose(
+        speed_in_r3, 
+        riemannian_speed, 
+        err_msg="3D velocity norm in ambient space (global_state) must equal Riemannian norm"
+    )
+    
+    # 3. Check dtypes
+    assert obs["local_state"].dtype == np.float32, f"local_state dtype must be float32, got {obs['local_state'].dtype}"
+    assert obs["global_state"].dtype == np.float32, f"global_state dtype must be float32, got {obs['global_state'].dtype}"
+    
+    print("  [OK] Observation velocity basis and 3D consistency passed.")
 
 def test_global_velocity_vector(env, flat_env):
     """
@@ -248,7 +274,6 @@ def test_global_velocity_vector(env, flat_env):
     """
     print("  [~] Running 3D global velocity vector tests...")
     
-    # 1. Shape and Dtype checks
     state = np.array([1.0, 1.0, 2.0, 3.0], dtype=np.float32)
     V = env._global_velocity_vector(state)
     
@@ -256,8 +281,7 @@ def test_global_velocity_vector(env, flat_env):
     assert V.shape == (3,), f"expected shape (3,), got {V.shape}"
     assert V.dtype == np.float32, f"expected dtype float32, got {V.dtype}"
     
-    # 2. Analytical check on flat plane (z = 0)
-    # r(u,v) = (u, v, 0) => V = (v_u, v_v, 0)
+    # Check on flat plane (z = 0)
     flat_env.reset(seed=42)
     V_flat = flat_env._global_velocity_vector(state)
     np.testing.assert_allclose(
@@ -275,7 +299,6 @@ def main():
     
     start_time = time.time()
     
-    # Initialize environments
     print("\n[1/2] Compiling Paraboloid Environment (SymPy -> NumPy)...")
     paraboloid_env = create_paraboloid_env()
     
@@ -284,7 +307,7 @@ def main():
     
     print(f"\nEnvironments compiled in {time.time() - start_time:.2f} seconds. Starting tests...\n")
     
-    # Run all test suites
+    # Run test suite
     test_gym_api_compliance(paraboloid_env)
     test_flat_manifold_kinematics(flat_env)
     test_action_isometry(paraboloid_env)
