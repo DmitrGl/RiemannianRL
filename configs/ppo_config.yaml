@@ -1,0 +1,27 @@
+# ppo_config.yaml
+model:
+  hidden_size: 64
+
+training:
+  total_timesteps: 100000
+  rollout_steps: 2048
+  batch_size: 64
+  epochs: 10
+  gamma: 0.99
+  lam: 0.95
+  epsilon_clip: 0.2 
+
+actor_optimizer:
+  lr: 0.0003
+  
+  weight_decay: 0.0
+
+critic_optimizer:
+  lr: 0.0003
+  
+  weight_decay: 0.0
+
+logging:
+  log_interval: 10
+  save_dir: "./runs"
+  use_wandb: false

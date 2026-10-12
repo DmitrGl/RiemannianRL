@@ -26,6 +26,7 @@ class GeodesicGliderEnv(gym.Env):
         self.glider_state = np.array([0, 0, 0, 0], dtype= np.float32)
         self.target_state = np.array([0, 0, 0, 0], dtype= np.float32)
         self.previous_distance = 0
+        self.maximum_thrust = 1.0
 
         # observation is dict 
         # {loval_state: [u1, v1, v1_u, v1_v,   u2, v2, v2_u, v2_v],
@@ -142,14 +143,16 @@ class GeodesicGliderEnv(gym.Env):
         Returns: (observation, reward, terminated, truncated, info)
         """
         action = self._change_basis_in_tangent_space(self.glider_state, action)
+        action *= self.maximum_thrust
         self.glider_state = self._rk4_step(self.glider_state, action, 0.01)
         self.target_state = self._rk4_step(self.target_state, np.array([0,0]), 0.01)
+        self.time += 0.01
 
         obs = self._get_observation()
         reward = self._get_reward()
-        terminated = False  
-        truncated = False   
-        info = {}           
+        terminated = self.is_terminated  
+        truncated = self.is_truncated   
+        info = {"reason": self.reason}           
         return obs, reward, terminated, truncated, info
     
     def _global_velocity_vector (self, state):
@@ -164,6 +167,8 @@ class GeodesicGliderEnv(gym.Env):
 
         V = r_u_vec * dudt + r_v_vec * dvdt
         return V
+
+
 
 
     def _calculate_distance(self, N):
@@ -208,6 +213,15 @@ class GeodesicGliderEnv(gym.Env):
         g_pos = np.array(self.r(glider[0],glider[1])).reshape(-1)
         t_pos = np.array(self.r(target[0],target[1])).reshape(-1)
 
+        if(np.max(np.abs(g_pos)) > self.cord_limit or np.max(np.abs(t_pos)) > self.cord_limit):
+            self.is_terminated = True
+            self.reason = "too far"
+        if(np.linalg.norm(g_pos - t_pos) < 1e-5):
+            self.is_terminated = True
+            self.reason = "completed"
+        if(self.time > 10):
+            self.is_truncated = True
+            self.reason = "timeout"
         
         obs = {
             "local_state": np.concatenate([glider, target]).astype(np.float32),
@@ -222,6 +236,10 @@ class GeodesicGliderEnv(gym.Env):
         distance = self._calculate_distance(self.N)
         delta = self.previous_distance - distance
         self.previous_distance = distance
+        if(self.reason == "completed"):
+            delta += 10
+        if(self.reason == "too far"):
+            delta -= 0
         return delta - 0.01
 
     
@@ -232,13 +250,20 @@ class GeodesicGliderEnv(gym.Env):
 
         Returns: (observation, info)
         """
+        self.cord_limit = 5.0
+        self.is_terminated = False
+        self.is_truncated = False
+        self.time = 0
+        self.reason = "None"
         rng = np.random.default_rng(seed)
-        mu = options.get('mu', 0) if options else 0
-        sigma2 = options.get('sigma2', 0) if options else 1
+        mu_gl = options.get('mu_gl', 0) if options else 0
+        sigma_gl = options.get('sigma_gl', 0) if options else 0.3
+        mu_tg = options.get('mu_tg', 0) if options else 0
+        sigma_tg = options.get('sigma_tg', 0) if options else 0.3
         N = options.get('N', 0) if options else 10
         self.N = N
-        self.glider_state = rng.normal(mu,sigma2,4)
-        self.target_state = rng.normal(mu,sigma2,4)
+        self.glider_state = rng.normal(mu_gl,sigma_gl,4)
+        self.target_state = rng.normal(mu_tg,sigma_tg,4)
         self.previous_distance = self._calculate_distance(N)
         
         self.rng = rng

@@ -204,14 +204,14 @@ def test_distance_and_reward_logic(env):
 def test_reset_options_parsing(env):
     """
     Ensures that reset() correctly parses options as a dictionary:
-    options = {'mu': ..., 'sigma2': ..., 'N': ...}
+    options = {'mu': ..., 'sigma': ..., 'N': ...}
     Also checks default values when options is None.
     """
     print("  [~] Running reset options dictionary tests...")
     
     # 1. Custom options dictionary
     mu_test, sigma_test, N_test = 100.0, 0.001, 50
-    options_dict = {'mu': mu_test, 'sigma2': sigma_test, 'N': N_test}
+    options_dict = {'mu': mu_test, 'sigma': sigma_test, 'N': N_test}
     env.reset(seed=777, options=options_dict)
     
     for val in env.glider_state:
