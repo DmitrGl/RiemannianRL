@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import torch.distributions as dist
 from torch.distributions import transforms
+import math
+def layer_init(layer, std = math.sqrt(2), bias_const = 0.0):
+    nn.init.orthogonal_(layer.weight, gain= std)
+    nn.init.constant_(layer.bias, bias_const)
+    return layer
 
 class Actor(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden = 64):
@@ -11,11 +16,11 @@ class Actor(nn.Module):
         self.act_dim = act_dim
 
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden),
+            layer_init(nn.Linear(obs_dim, hidden)),
             nn.LeakyReLU(),
-            nn.Linear(hidden, hidden),
+            layer_init(nn.Linear(hidden, hidden)),
             nn.LeakyReLU(),
-            nn.Linear(hidden,act_dim)
+            layer_init(nn.Linear(hidden,act_dim), std= 0.01)
         )
         self.log_std = nn.Parameter(torch.zeros(act_dim))
     
@@ -29,7 +34,7 @@ class Actor(nn.Module):
             [transforms.TanhTransform(cache_size=1)]
         )
 
-        return dist.Independent(tanh_dist, 1)
+        return dist.Independent(base_dist, 1)
 
 class Critic(nn.Module):
     def __init__(self, obs_dim, hidden = 64):
@@ -38,11 +43,11 @@ class Critic(nn.Module):
         self.obs_dim = obs_dim
 
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden),
+            layer_init(nn.Linear(obs_dim, hidden)),
             nn.LeakyReLU(),
-            nn.Linear(hidden, hidden),
+            layer_init(nn.Linear(hidden, hidden)),
             nn.LeakyReLU(),
-            nn.Linear(hidden,1)
+            layer_init(nn.Linear(hidden,1),std= 1.0)
         )
     
     def forward(self, x):

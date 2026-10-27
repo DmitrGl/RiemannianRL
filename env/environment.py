@@ -26,7 +26,7 @@ class GeodesicGliderEnv(gym.Env):
         self.glider_state = np.array([0, 0, 0, 0], dtype= np.float32)
         self.target_state = np.array([0, 0, 0, 0], dtype= np.float32)
         self.previous_distance = 0
-        self.maximum_thrust = 1.0
+        
 
         # observation is dict 
         # {loval_state: [u1, v1, v1_u, v1_v,   u2, v2, v2_u, v2_v],
@@ -147,12 +147,17 @@ class GeodesicGliderEnv(gym.Env):
         self.glider_state = self._rk4_step(self.glider_state, action, 0.01)
         self.target_state = self._rk4_step(self.target_state, np.array([0,0]), 0.01)
         self.time += 0.01
-
+        
+        global_state = self.cur_obs["global_state"]
         obs = self._get_observation()
         reward = self._get_reward()
+        self._get_termination(global_state[:3], global_state[6:9])
         terminated = self.is_terminated  
         truncated = self.is_truncated   
-        info = {"reason": self.reason}           
+        info = {
+            "reason": self.reason,
+            "distance": self.previous_distance
+            }           
         return obs, reward, terminated, truncated, info
     
     def _global_velocity_vector (self, state):
@@ -191,7 +196,23 @@ class GeodesicGliderEnv(gym.Env):
             if i > 0:
                 dist += np.linalg.norm(points[i]-points[i-1])
         return dist
-        
+
+
+    def _get_termination(self, prev_g, prev_t):
+        obs = self.cur_obs
+        global_state = obs["global_state"]
+        g = global_state[:3]
+        t = global_state[6:9]
+        p0, p1 = prev_g - prev_t, g - t
+        seg = p1 - p0
+        s = np.clip(-(p0 @ seg) / max(seg @ seg, 1e-12), 0.0, 1.0)
+        if np.linalg.norm(p0 + s * seg) < self.complete_region:
+            self.is_terminated, self.reason = True, "completed"
+        elif max(np.max(np.abs(g)), np.max(np.abs(t))) > self.cord_limit:
+            self.is_terminated, self.reason = True, "too far"
+        elif self.time >= self.timeout:
+            self.is_truncated, self.reason = True, "timeout"
+    
     def _get_observation(self):
         """
         Transforms velocity vectors from tangent space coordinate basis (du/dt, dv/dt)
@@ -213,20 +234,13 @@ class GeodesicGliderEnv(gym.Env):
         g_pos = np.array(self.r(glider[0],glider[1])).reshape(-1)
         t_pos = np.array(self.r(target[0],target[1])).reshape(-1)
 
-        if(np.max(np.abs(g_pos)) > self.cord_limit or np.max(np.abs(t_pos)) > self.cord_limit):
-            self.is_terminated = True
-            self.reason = "too far"
-        if(np.linalg.norm(g_pos - t_pos) < 1e-5):
-            self.is_terminated = True
-            self.reason = "completed"
-        if(self.time > 10):
-            self.is_truncated = True
-            self.reason = "timeout"
+        
         
         obs = {
             "local_state": np.concatenate([glider, target]).astype(np.float32),
             "global_state": np.concatenate([g_pos,V_g,t_pos,V_t]).astype(np.float32)
         }
+        self.cur_obs = obs
         return obs
     
     def _get_reward(self):
@@ -234,12 +248,14 @@ class GeodesicGliderEnv(gym.Env):
         Reward function: reward model for getting closer to the target, punish for moving further away and for time passed.
         """
         distance = self._calculate_distance(self.N)
-        delta = self.previous_distance - distance
+        delta = self.distance_reward_scale*(self.previous_distance - distance)
         self.previous_distance = distance
         if(self.reason == "completed"):
-            delta += 10
+            delta += 20
         if(self.reason == "too far"):
-            delta -= 0
+            delta -= 20
+        if(self.reason == "timeout"):
+            delta -= 10
         return delta - 0.01
 
     
@@ -247,30 +263,64 @@ class GeodesicGliderEnv(gym.Env):
         """
         Reset environment to initial state.
         Randomly generates initial positions and velocities for glider and target.
+        default options are:
+        options = {
+            'timeout': 10,
+            'cord_limit': 5.0,
+            'maximum_thrust': 10,
+            'complete_region': 1e-2,
+            'distance_reward_scale': 2,
+            'mu_gl': 0,
+            'sigma_gl': cord_limit/2,
+            'mu_tg': 0,
+            'sigma_tg': self.cord_limit/2,
+            'mu_gl_vel': 0,
+            'sigma_gl_vel': 0.3,
+            'mu_tg_vel': 0,
+            'sigma_tg_vel': 0.3,
+            'N': 10
+        }
 
         Returns: (observation, info)
         """
-        self.cord_limit = 5.0
-        self.is_terminated = False
-        self.is_truncated = False
-        self.time = 0
-        self.reason = "None"
-        rng = np.random.default_rng(seed)
-        mu_gl = options.get('mu_gl', 0) if options else 0
-        sigma_gl = options.get('sigma_gl', 0) if options else 0.3
-        mu_tg = options.get('mu_tg', 0) if options else 0
-        sigma_tg = options.get('sigma_tg', 0) if options else 0.3
-        N = options.get('N', 0) if options else 10
-        self.N = N
-        self.glider_state = rng.normal(mu_gl,sigma_gl,4)
-        self.target_state = rng.normal(mu_tg,sigma_tg,4)
-        self.previous_distance = self._calculate_distance(N)
+        self.is_terminated = True
+        self.is_truncated = True
+        while(self.is_terminated or self.is_truncated):
+            self.is_terminated = False
+            self.is_truncated = False
+            self.time = 0
+            self.reason = "None"
+            rng = np.random.default_rng(seed)
+            self.timeout = options.get('timeout', 10) if options else 10
+            self.cord_limit = options.get('cord_limit', 5.0) if options else 5.0
+            self.maximum_thrust = options.get('maximum_thrust', 10) if options else 10
+            self.complete_region = options.get('complete_region', 1e-2) if options else 1e-2
+            self.distance_reward_scale = options.get('distance_reward_scale', 2) if options else 2
+            mu_gl = options.get('mu_gl', 0) if options else 0
+            sigma_gl = options.get('sigma_gl', self.cord_limit/2) if options else self.cord_limit/2
+            mu_tg = options.get('mu_tg', 0) if options else 0
+            sigma_tg = options.get('sigma_tg', self.cord_limit/2) if options else self.cord_limit/2
+            mu_gl_vel = options.get('mu_gl_vel', 0) if options else 0
+            sigma_gl_vel = options.get('sigma_gl_vel', 0.3) if options else 0.3
+            mu_tg_vel = options.get('mu_tg_vel', 0) if options else 0
+            sigma_tg_vel = options.get('sigma_tg_vel', 0.3) if options else 0.3
+
+            N = options.get('N', 10) if options else 10
+            self.N = N
+            self.glider_state = np.concat((rng.normal(mu_gl,sigma_gl, 2),rng.normal(mu_gl_vel,sigma_gl_vel,2)))
+            self.target_state = np.concat((rng.normal(mu_tg,sigma_tg, 2),rng.normal(mu_tg_vel,sigma_tg_vel,2)))
+            self.previous_distance = self._calculate_distance(N)
+
+            self.rng = rng
+            obs = self._get_observation()
+            global_state = obs["global_state"]
+            self._get_termination(global_state[:3], global_state[6:9])
         
-        self.rng = rng
-        obs = self._get_observation()
-        
+
          
-        info = {}     
+        info = {
+            "distance": self.previous_distance,
+        }     
         return obs, info
 
     

@@ -1,0 +1,62 @@
+Metadata-Version: 2.4
+Name: riemannianrl
+Version: 0.1.0
+Summary: Riemannian Reinforcement Learning glider simulation environment
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: gymnasium
+Requires-Dist: numpy
+Requires-Dist: sympy
+Requires-Dist: torch
+Requires-Dist: pyyaml
+
+# Riemannian RL: Geodesic Glider on 3D Manifolds
+
+Исследовательский проект по обучению агентов методом Reinforcement Learning (PPO) на неевклидовых пространствах и римановых многообразиях с кривизной.
+
+В рамках проекта реализуется кастомная среда Gymnasium, моделирующая динамику движения частицы (глайдера) по искривленной поверхности вдоль геодезических линий, а также кастомная политика PPO с использованием экспоненциального отображения в касательном пространстве ($T_\mu \mathcal{M}$).
+
+---
+
+## 🎯 Основные цели проекта
+
+- [ ] **Геометрическая среда (Gymnasium):** Численное интегрирование уравнений геодезических ($\ddot{x}^i + \Gamma^i_{jk}\dot{x}^j\dot{x}^k = F^i$) с использованием `SymPy` и `SciPy`.
+- [ ] **Риманова политика в PyTorch:** Реализация кастомного распределения вероятностей (`RiemannianNormal`), семплирующего действия в касательном пространстве с проецированием через $\exp_\mu(v)$.
+- [ ] **Коррекция Log-Prob (Change of Variables):** Вычисление логарифма детерминанта Якобиана экспоненциального отображения для точного расчета лосс-функции PPO в искривленном пространстве.
+- [ ] **3D Визуализация:** Интерактивный рендеринг траекторий и многообразий с использованием `PyVista` / `Plotly`.
+
+---
+
+## 🛠 Стек технологий
+
+- **Language:** Python 3.11 (`pyenv`)
+- **Deep Learning / RL:** PyTorch, Gymnasium
+- **Math & Physics:** SymPy, SciPy, NumPy
+- **3D Visualization & Logging:** PyVista, Plotly, Weights & Biases (WandB)
+
+---
+
+## 📁 Структура проекта
+
+```text
+riemannian_glider/
+├── env/                        # Всё, что связано с симуляцией (Фаза 1)
+│   ├── __init__.py
+│   └── geodesic_env.py         # Ваш класс GeodesicGliderEnv
+├── geometry/                   # Математическое ядро проекта
+│   ├── __init__.py
+│   ├── manifold.py             # Описание Гауссова холма, SymPy-логика, тензоры
+│   └── distributions.py        # Кастомные вероятностные распределения PyTorch (Фаза 2)
+├── agent/                      # Архитектура агента и алгоритм обучения (Фаза 3)
+│   ├── __init__.py
+│   ├── networks.py             # PyTorch-модели Actor и Critic
+│   └── ppo.py                  # Логика PPO (вычисление loss, PPO-clip, обновление весов)
+├── scripts/                    # Точки входа
+│   ├── train.py                # Главный цикл обучения (взаимодействие env и agent)
+│   └── evaluate.py             # Скрипт для тестирования и визуализации обученной модели
+├── configs/                    # Гиперпараметры (чтобы не хардкодить их в коде)
+│   └── ppo_config.yaml         # lr, gamma, batch_size, параметры холма и т.д.
+├── requirements.txt
+└── README.md                   # Описание проекта, формулы, инструкции по запуску

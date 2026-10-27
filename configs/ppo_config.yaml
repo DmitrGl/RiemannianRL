@@ -10,6 +10,24 @@ training:
   gamma: 0.99
   lam: 0.95
   epsilon_clip: 0.2 
+  target_kl: 0.015
+  ent_coef: 0.005
+
+environment:
+  timeout: 10
+  cord_limit: 5.0
+  maximum_thrust: 30
+  complete_region: 0.1
+  distance_reward_scale: 10
+  mu_gl: 1
+  sigma_gl: 2
+  mu_tg: 0
+  sigma_tg: 0
+  mu_gl_vel: 0
+  sigma_gl_vel: 1
+  mu_tg_vel: 0
+  sigma_tg_vel: 0
+  N: 10
 
 actor_optimizer:
   lr: 0.0003
@@ -22,6 +40,9 @@ critic_optimizer:
   weight_decay: 0.0
 
 logging:
-  log_interval: 10
+  log_interval: 30
+  video_interval: 100
   save_dir: "./runs"
-  use_wandb: false
+  use_wandb: true
+  wandb_project: "riemannian-rl-glider"
+  log_histograms: false
