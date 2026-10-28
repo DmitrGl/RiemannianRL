@@ -15,7 +15,7 @@ training:
 
 environment:
   timeout: 10
-  cord_limit: 5.0
+  cord_limit: 7.0
   maximum_thrust: 30
   complete_region: 0.1
   distance_reward_scale: 10
@@ -26,7 +26,7 @@ environment:
   mu_gl_vel: 0
   sigma_gl_vel: 1
   mu_tg_vel: 0
-  sigma_tg_vel: 0
+  sigma_tg_vel: 1
   N: 10
 
 actor_optimizer:

@@ -42,7 +42,7 @@ def main():
     r_manifold = sp.Matrix([u, v, sp.exp(-(u**2 + v**2))])
     env = GeodesicGliderEnv(r_manifold, cords= [u,v])
     local_obs_dim = env.observation_space["local_state"].shape[0]
-    obs_dim = local_obs_dim + env.observation_space["global_state"].shape[0]
+    obs_dim = local_obs_dim + env.observation_space["global_state"].shape[0] + env.observation_space["ego_features"].shape[0]
     act_dim = env.action_space.shape[0]
     
     actor = network.Actor(obs_dim, act_dim, hidden= cfg.model.hidden_size)
@@ -83,6 +83,7 @@ def main():
     obs, info = env.reset(options= options_dict)
     local_obs = obs["local_state"]
     global_obs = obs["global_state"]
+    ego_features = obs["ego_features"]
     next_value = -1
     episode_reward = 0
     episode_length = 0
@@ -102,7 +103,7 @@ def main():
     until_video = cfg.logging.video_interval
     for i in range(T):
     #while(1):
-        action, logprob, state_val, n_local_obs, n_global_obs = agent.select_action(local_obs, global_obs)
+        action, logprob, state_val, n_local_obs, n_global_obs, n_ego = agent.select_action(local_obs, global_obs, ego_features)
         
         obs, reward, terminated, truncated, info = env.step(np.tanh(action))
         done = terminated or truncated
@@ -110,9 +111,10 @@ def main():
         n_reward = agent.normalize_reward(reward, done=done)
 
 
-        buffer.store(n_local_obs, n_global_obs, action, logprob, n_reward, state_val, (terminated or truncated))
+        buffer.store(n_local_obs, n_global_obs, n_ego, action, logprob, n_reward, state_val, (terminated or truncated))
         local_obs = obs["local_state"]
         global_obs = obs["global_state"]
+        ego_features = obs["ego_features"]
         episode_reward += reward
         episode_length += 1
         episode_min_distance = min(episode_min_distance, info["distance"])
@@ -139,6 +141,7 @@ def main():
             obs, info = env.reset(options= options_dict)
             local_obs = obs["local_state"]
             global_obs = obs["global_state"]
+            ego_features = obs["ego_features"]
             total_rewards.append(episode_reward)
             total_success.append(1 if reason == 'completed' else 0)
             total_too_far.append(1 if reason == 'too far' else 0)

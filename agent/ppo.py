@@ -9,6 +9,7 @@ class RolloutBuffer:
         self.cur = 0
         self.local_states = []
         self.global_states = []
+        self.ego_features = []
         self.actions = []
         self.logprobs = []
         self.rewards = []
@@ -35,6 +36,7 @@ class RolloutBuffer:
     def clear(self):
         self.local_states = []
         self.global_states = []
+        self.ego_features = []
         self.actions = []
         self.logprobs = []
         self.rewards = []
@@ -42,10 +44,11 @@ class RolloutBuffer:
         self.is_terminals = []
         self.cur = 0
 
-    def store(self, local_state, global_state, action, logprob, reward, value, is_terminal):
+    def store(self, local_state, global_state, ego_feature, action, logprob, reward, value, is_terminal):
         i = self.cur
         self.local_states.append(local_state)
         self.global_states.append(global_state)
+        self.ego_features.append(ego_feature)
         self.actions.append(action)
         self.logprobs.append(logprob)
         self.rewards.append(reward)
@@ -73,6 +76,7 @@ class PPOAgent:
         self.batch_size = batch_size
         self.local_rms = RunningMeanStd()
         self.global_rms = RunningMeanStd()
+        self.ego_rms = RunningMeanStd()
         self.ret_rms = RunningMeanStd()
         self._disc_return = 0.0
         self.is_training = True 
@@ -81,14 +85,15 @@ class PPOAgent:
         self.is_training = flag
 
 
-    def select_action(self, local_obs, global_obs):
+    def select_action(self, local_obs, global_obs, ego_features):
         if(self.local_rms.mean is None):
             self.local_rms.mean = np.zeros_like(local_obs)
             self.global_rms.mean = np.zeros_like(global_obs)
-        n_local, n_global = self.normalize_obs(local_obs, global_obs)
+            self.ego_rms.mean = np.zeros_like(ego_features)
+        n_local, n_global, n_ego = self.normalize_obs(local_obs, global_obs, ego_features)
 
 
-        obs = torch.tensor(np.concatenate((n_local, n_global)), dtype=torch.float32)
+        obs = torch.tensor(np.concatenate((n_local, n_global, n_ego)), dtype=torch.float32)
         local = torch.tensor(n_local, dtype=torch.float32)
         
         with torch.no_grad():
@@ -96,7 +101,7 @@ class PPOAgent:
             action = dist.sample()
             action_logprob = dist.log_prob(action)
             state_val = self.critic(local)
-        return action.numpy(), action_logprob.item(), state_val.item(), n_local, n_global
+        return action.numpy(), action_logprob.item(), state_val.item(), n_local, n_global, n_ego
 
     def update(self, buffer, next_value):
         advantages, returns = buffer.compute_gae(next_value)
@@ -108,7 +113,8 @@ class PPOAgent:
         
         global_states = torch.tensor(np.asarray(buffer.global_states, dtype=np.float32), dtype=torch.float32)
         local_states = torch.tensor(np.asarray(buffer.local_states, dtype=np.float32), dtype=torch.float32)
-        states = torch.cat([local_states,global_states], dim = 1)
+        ego_features = torch.tensor(np.asarray(buffer.ego_features, dtype=np.float32), dtype=torch.float32)
+        states = torch.cat([local_states,global_states,ego_features], dim = 1)
         actions = torch.tensor(np.asarray(buffer.actions, dtype=np.float32), dtype=torch.float32)
         logprobs = torch.tensor(np.asarray(buffer.logprobs, dtype=np.float32), dtype=torch.float32)
         values = torch.tensor(np.asarray(buffer.values, dtype=np.float32), dtype=torch.float32)
@@ -192,14 +198,14 @@ class PPOAgent:
             "explained_variance": float(np.mean(explained_variances)),
             "mean_advantage": adv_mean.item(),
             "std_advantage": adv_std.item(),
-            "mean_return": float(self.ret_rms.mean),
-            "std_return": float(np.sqrt(self.ret_rms.var)),
+            "mean_return": returns.mean().item(),
+            "std_return": returns.std().item(),
             "policy/log_std_0": self.actor.log_std[0].item(),
             "policy/log_std_1": self.actor.log_std[1].item(),
         }
         return metrics
 
-    def normalize_obs(self, local_obs, global_obs=None, update=None):
+    def normalize_obs(self, local_obs, global_obs=None, ego_features=None, update=None):
         update = self.is_training if update is None else update
 
         if update:
@@ -211,9 +217,11 @@ class PPOAgent:
 
         if update:
             self.global_rms.update(global_obs)
+            self.ego_rms.update(ego_features)
         n_global = self.global_rms.normalize(global_obs)
+        n_ego = self.ego_rms.normalize(ego_features)
 
-        return n_local, n_global
+        return n_local, n_global, n_ego
     
     def normalize_reward(self, reward, done=False, update=None):
         update = self.is_training if update is None else update

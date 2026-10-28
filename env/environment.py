@@ -29,13 +29,14 @@ class GeodesicGliderEnv(gym.Env):
         
 
         # observation is dict 
-        # {loval_state: [u1, v1, v1_u, v1_v,   u2, v2, v2_u, v2_v],
+        # {local_state: [u1, v1, v1_u, v1_v,   u2, v2, v2_u, v2_v],
         #  global_state: [x1, y1, z1, v1_x, v1_y, v1_z,   x2, y2, z2, v2_x, v2_y, v2_z]}
         # where 1 - glider, 2 - target
         self.observation_space = gym.spaces.Dict(
             {
                 "local_state": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32),
                 "global_state": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(12,), dtype=np.float32),
+                "ego_features": gym.spaces.Box(low=-np.inf, high=np.inf, shape= (6,), dtype=np.float32),
             }
         )
         # action is vector [a_u, a_v]
@@ -143,6 +144,7 @@ class GeodesicGliderEnv(gym.Env):
         Returns: (observation, reward, terminated, truncated, info)
         """
         action = self._change_basis_in_tangent_space(self.glider_state, action)
+        action *= max(1, 1/np.linalg.norm(action))
         action *= self.maximum_thrust
         self.glider_state = self._rk4_step(self.glider_state, action, 0.01)
         self.target_state = self._rk4_step(self.target_state, np.array([0,0]), 0.01)
@@ -241,6 +243,9 @@ class GeodesicGliderEnv(gym.Env):
             "global_state": np.concatenate([g_pos,V_g,t_pos,V_t]).astype(np.float32)
         }
         self.cur_obs = obs
+        ego_features = self._ego_features()
+        obs["ego_features"] = ego_features
+        self.cut_obs = obs
         return obs
     
     def _get_reward(self):
@@ -323,6 +328,19 @@ class GeodesicGliderEnv(gym.Env):
         }     
         return obs, info
 
-    
+    def _ego_features(self):
+        g, t = self.glider_state, self.target_state
+        global_state = self.cur_obs['global_state']
+        gp, tp = global_state[0:3], global_state[6:9]
+        ru = np.asarray(self.r_u(g[0], g[1]), float).reshape(-1)
+        rv = np.asarray(self.r_v(g[0], g[1]), float).reshape(-1)
+        e1 = ru / np.linalg.norm(ru)
+        e2 = rv - (rv @ e1) * e1; e2 /= np.linalg.norm(e2)
+        
+        d = tp - gp
+        dv = self._global_velocity_vector(t) - self._global_velocity_vector(g)
+        return np.array([d @ e1, d @ e2, np.linalg.norm(d),
+                        dv @ e1, dv @ e2,self.timeout - self.time],
+                        dtype=np.float32)    
 
 
