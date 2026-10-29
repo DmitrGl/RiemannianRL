@@ -43,6 +43,6 @@ logging:
   log_interval: 30
   video_interval: 100
   save_dir: "./runs"
-  use_wandb: true
+  use_wandb: false
   wandb_project: "riemannian-rl-glider"
   log_histograms: false

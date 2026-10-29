@@ -152,8 +152,8 @@ class GeodesicGliderEnv(gym.Env):
         
         global_state = self.cur_obs["global_state"]
         obs = self._get_observation()
-        reward = self._get_reward()
         self._get_termination(global_state[:3], global_state[6:9])
+        reward = self._get_reward()
         terminated = self.is_terminated  
         truncated = self.is_truncated   
         info = {
@@ -254,6 +254,7 @@ class GeodesicGliderEnv(gym.Env):
         """
         distance = self._calculate_distance(self.N)
         delta = self.distance_reward_scale*(self.previous_distance - distance)
+        self.time_peanlty += 0.0001
         self.previous_distance = distance
         if(self.reason == "completed"):
             delta += 20
@@ -261,7 +262,7 @@ class GeodesicGliderEnv(gym.Env):
             delta -= 20
         if(self.reason == "timeout"):
             delta -= 10
-        return delta - 0.01
+        return delta - self.time_peanlty
 
     
     def reset(self, seed = None, options = None):
@@ -290,12 +291,13 @@ class GeodesicGliderEnv(gym.Env):
         """
         self.is_terminated = True
         self.is_truncated = True
+        rng = np.random.default_rng(seed)
         while(self.is_terminated or self.is_truncated):
             self.is_terminated = False
             self.is_truncated = False
             self.time = 0
+            self.time_peanlty = 0.01
             self.reason = "None"
-            rng = np.random.default_rng(seed)
             self.timeout = options.get('timeout', 10) if options else 10
             self.cord_limit = options.get('cord_limit', 5.0) if options else 5.0
             self.maximum_thrust = options.get('maximum_thrust', 10) if options else 10

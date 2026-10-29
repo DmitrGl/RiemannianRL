@@ -221,6 +221,51 @@ def main():
     print("End of trainig process: Training complete")
 
 
+    # ================= save trained model under a version name =================
+    models_dir = BASE_DIR.parent / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    while True:
+        version = input("\nEnter model version name to save (empty = skip): ").strip()
+        if version == "":
+            print("Saving skipped.")
+            break
+
+        save_path = models_dir / f"{version}.pt"
+        if save_path.exists():
+            answer = input(f"Version '{version}' already exists. Overwrite? [Y/N]: ").strip().lower()
+            if answer != "y" and answer != "Y":
+                continue
+
+        torch.save(
+            {
+                # weights
+                "actor_state_dict": actor.state_dict(),
+                "critic_state_dict": critic.state_dict(),
+                # observation normalization statistics (important for inference!)
+                "local_rms": agent.local_rms.state_dict(),
+                "global_rms": agent.global_rms.state_dict(),
+                "ego_rms": agent.ego_rms.state_dict(),
+                # everything needed to rebuild the exact same env + networks
+                "config": cfg_dict,
+                "options": options_dict,
+                "manifold_expr": str(r_manifold[2]),
+                "actor_obs_dim": obs_dim,
+                "critic_obs_dim": local_obs_dim,
+                "act_dim": act_dim,
+                # metadata
+                "global_step": global_step,
+                "episode_count": episode_count,
+            },
+            save_path,
+        )
+        print(f"Model saved: {save_path}")
+        break
+
+
+
+
+
 
 if __name__ == "__main__":
     main()
