@@ -40,13 +40,16 @@ def main():
     
     u, v = sp.symbols('u v')
     r_manifold = sp.Matrix([u, v, sp.exp(-(u**2 + v**2))])
+    #r_manifold = sp.Matrix([u, v, u+v])
     env = GeodesicGliderEnv(r_manifold, cords= [u,v])
     local_obs_dim = env.observation_space["local_state"].shape[0]
     obs_dim = local_obs_dim + env.observation_space["global_state"].shape[0] + env.observation_space["ego_features"].shape[0]
+    critic_dim = local_obs_dim + env.observation_space["ego_features"].shape[0]
+    actor_dim = obs_dim
     act_dim = env.action_space.shape[0]
     
-    actor = network.Actor(obs_dim, act_dim, hidden= cfg.model.hidden_size)
-    critic = network.Critic(local_obs_dim, hidden= cfg.model.hidden_size)
+    actor = network.Actor(actor_dim, act_dim, hidden= cfg.model.hidden_size)
+    critic = network.Critic(critic_dim, hidden= cfg.model.hidden_size)
     buffer = ppo.RolloutBuffer(cfg.training.rollout_steps, cfg.training.gamma, cfg.training.lam)
     T = cfg.training.total_timesteps
     agent = ppo.PPOAgent(
@@ -108,10 +111,10 @@ def main():
         obs, reward, terminated, truncated, info = env.step(np.tanh(action))
         done = terminated or truncated
         
-        n_reward = agent.normalize_reward(reward, done=done)
+        #n_reward = agent.normalize_reward(reward, done=done)
+        n_reward = reward
 
-
-        buffer.store(n_local_obs, n_global_obs, n_ego, action, logprob, n_reward, state_val, (terminated or truncated))
+        buffer.store(n_local_obs, n_global_obs, n_ego, action, logprob, n_reward, state_val, terminated )
         local_obs = obs["local_state"]
         global_obs = obs["global_state"]
         ego_features = obs["ego_features"]
@@ -121,6 +124,25 @@ def main():
         global_step += 1
         glider_history.append(obs["global_state"][:3].copy())
         target_history.append(obs["global_state"][6:9].copy())
+        
+        if(buffer.cur == buffer.n):
+            #end of rollout
+            next_value = agent.get_next_value(local_obs, ego_features, done=terminated)
+            
+            metrics = agent.update(buffer, next_value)
+            buffer.clear()
+
+            if(use_wandb):
+                wandb_metrics = {}
+
+                for key, value in metrics.items():
+                    wandb_metrics[f"train/{key}"] = value
+                wandb.log(
+                    wandb_metrics,
+                    step = global_step
+                )
+        
+        
         
         if done:
             #end of episode
@@ -200,22 +222,6 @@ def main():
             target_history.append(obs["global_state"][6:9].copy())
 
 
-        if(buffer.cur == buffer.n):
-            #end of rollout
-            next_value = agent.get_next_value(local_obs, done=done)
-            
-            metrics = agent.update(buffer, next_value)
-            buffer.clear()
-
-            if(use_wandb):
-                wandb_metrics = {}
-
-                for key, value in metrics.items():
-                    wandb_metrics[f"train/{key}"] = value
-                wandb.log(
-                    wandb_metrics,
-                    step = global_step
-                )
             
     wandb.finish()
     print("End of trainig process: Training complete")
@@ -250,8 +256,8 @@ def main():
                 "config": cfg_dict,
                 "options": options_dict,
                 "manifold_expr": str(r_manifold[2]),
-                "actor_obs_dim": obs_dim,
-                "critic_obs_dim": local_obs_dim,
+                "actor_obs_dim": actor_dim,
+                "critic_obs_dim": critic_dim,
                 "act_dim": act_dim,
                 # metadata
                 "global_step": global_step,

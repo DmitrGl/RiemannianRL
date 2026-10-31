@@ -91,16 +91,17 @@ class PPOAgent:
             self.global_rms.mean = np.zeros_like(global_obs)
             self.ego_rms.mean = np.zeros_like(ego_features)
         n_local, n_global, n_ego = self.normalize_obs(local_obs, global_obs, ego_features)
-
+        n_ego = ego_features
 
         obs = torch.tensor(np.concatenate((n_local, n_global, n_ego)), dtype=torch.float32)
         local = torch.tensor(n_local, dtype=torch.float32)
+        actor_obs = torch.tensor(np.concatenate((n_local, n_ego)), dtype=torch.float32)
         
         with torch.no_grad():
             dist = self.actor(obs)
             action = dist.sample()
             action_logprob = dist.log_prob(action)
-            state_val = self.critic(local)
+            state_val = self.critic(actor_obs)
         return action.numpy(), action_logprob.item(), state_val.item(), n_local, n_global, n_ego
 
     def update(self, buffer, next_value):
@@ -138,16 +139,21 @@ class PPOAgent:
                 
                 mb_states = states[batch]
                 mb_local_states = local_states[batch]
+                mb_ego_features = ego_features[batch]
+
                 mb_actions = actions[batch]
 
                 mb_logprobs = logprobs[batch]
                 mb_advantages = advantages[batch]
                 
                 mb_returns = returns[batch]
-                mb_new_logprobs = self.actor(mb_states).log_prob(mb_actions)
-                mb_new_values = self.critic(mb_local_states).squeeze(-1)
+                new_dist = self.actor(mb_states)
+                mb_new_logprobs = new_dist.log_prob(mb_actions)
+                entropy = new_dist.entropy().mean()
+                #mb_new_logprobs = self.actor(mb_states).log_prob(mb_actions)
+                mb_new_values = self.critic(torch.cat([mb_local_states, mb_ego_features], dim=1)).squeeze(-1)
                 mb_values = values[batch]
-                entropy = -mb_new_logprobs.mean().item()
+                #entropy = -mb_new_logprobs.mean().item()
 
                 r = torch.exp(mb_new_logprobs - mb_logprobs)
                 #v_clipped = mb_values + torch.clamp(mb_new_values - mb_values, -e, e)
@@ -182,7 +188,7 @@ class PPOAgent:
                     critic_losses.append(loss_critic.item())
                     approx_kls.append(approx_kl)
                     clip_fractions.append(clip_fraction)
-                    entropies.append(entropy)
+                    entropies.append(entropy.item())
                     explained_variances.append(explained_variance)
             if(np.mean(kls) > self.target_kl):
                 break
@@ -212,14 +218,19 @@ class PPOAgent:
             self.local_rms.update(local_obs)
         n_local = self.local_rms.normalize(local_obs)
 
+        if update:
+            self.ego_rms.update(ego_features)
+        n_ego = self.ego_rms.normalize(ego_features)
+        
+
         if global_obs is None:
-            return n_local
+            return n_local, n_ego
 
         if update:
             self.global_rms.update(global_obs)
-            self.ego_rms.update(ego_features)
+        
         n_global = self.global_rms.normalize(global_obs)
-        n_ego = self.ego_rms.normalize(ego_features)
+        
 
         return n_local, n_global, n_ego
     
@@ -235,13 +246,13 @@ class PPOAgent:
 
         return self.ret_rms.scale(reward)
 
-    def get_next_value(self, local_obs, done=False):
+    def get_next_value(self, local_obs, ego_features, done=False):
         if done:
             return 0.0
-        n_local = self.normalize_obs(local_obs, update=False)
-        with torch.no_grad():
-            return float(self.critic(torch.tensor(n_local, dtype=torch.float32)).squeeze(-1).item())
+        n_local, n_ego = self.normalize_obs(local_obs, ego_features=ego_features, update=False)
 
+        with torch.no_grad():
+            return float(self.critic(torch.tensor(np.concatenate([n_local, n_ego]))).squeeze(-1))
 class RunningMeanStd:
 
     def __init__(self, eps=1e-8):

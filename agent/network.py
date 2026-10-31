@@ -23,16 +23,23 @@ class Actor(nn.Module):
             layer_init(nn.Linear(hidden,act_dim), std= 0.01)
         )
         self.log_std = nn.Parameter(torch.zeros(act_dim))
+        self.mu_max = 4
+        self.log_std_bounds = (-3, 0.5)
+
     
     def forward(self, x):
-        mu = self.net(x)
+        raw = self.net(x)
+
+        mu = self.mu_max * torch.tanh(raw / self.mu_max)
+        log_std = self.log_std.clamp(*self.log_std_bounds)
+
+        std = torch.exp(log_std)
         
-        std = torch.exp(self.log_std)
         base_dist = dist.Normal(mu, std)
-        tanh_dist = dist.TransformedDistribution(
-            base_dist,
-            [transforms.TanhTransform(cache_size=1)]
-        )
+        # tanh_dist = dist.TransformedDistribution(
+        #     base_dist,
+        #     [transforms.TanhTransform(cache_size=1)]
+        # )
 
         return dist.Independent(base_dist, 1)
 

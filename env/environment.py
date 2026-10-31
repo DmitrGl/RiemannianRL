@@ -143,9 +143,12 @@ class GeodesicGliderEnv(gym.Env):
 
         Returns: (observation, reward, terminated, truncated, info)
         """
-        action = self._change_basis_in_tangent_space(self.glider_state, action)
-        action *= max(1, 1/np.linalg.norm(action))
+        norm = np.linalg.norm(action)
+        if norm > 1.0:
+            action = action / norm
+
         action *= self.maximum_thrust
+        action = self._change_basis_in_tangent_space(self.glider_state, action)
         self.glider_state = self._rk4_step(self.glider_state, action, 0.01)
         self.target_state = self._rk4_step(self.target_state, np.array([0,0]), 0.01)
         self.time += 0.01
@@ -245,7 +248,7 @@ class GeodesicGliderEnv(gym.Env):
         self.cur_obs = obs
         ego_features = self._ego_features()
         obs["ego_features"] = ego_features
-        self.cut_obs = obs
+        self.cur_obs = obs
         return obs
     
     def _get_reward(self):
@@ -253,16 +256,19 @@ class GeodesicGliderEnv(gym.Env):
         Reward function: reward model for getting closer to the target, punish for moving further away and for time passed.
         """
         distance = self._calculate_distance(self.N)
+        #if(distance>self.initial_distance):
         delta = self.distance_reward_scale*(self.previous_distance - distance)
-        self.time_peanlty += 0.0001
+        #else:
+        #   delta = self.distance_reward_scale*(self.previous_distance - distance)/self.initial_distance
+        self.time_penalty += 0.0001
         self.previous_distance = distance
         if(self.reason == "completed"):
-            delta += 20
+            delta += 0
         if(self.reason == "too far"):
-            delta -= 20
+            delta -= 0
         if(self.reason == "timeout"):
-            delta -= 10
-        return delta - self.time_peanlty
+            delta -= 0
+        return delta - self.time_penalty
 
     
     def reset(self, seed = None, options = None):
@@ -296,7 +302,7 @@ class GeodesicGliderEnv(gym.Env):
             self.is_terminated = False
             self.is_truncated = False
             self.time = 0
-            self.time_peanlty = 0.01
+            self.time_penalty = 0.01
             self.reason = "None"
             self.timeout = options.get('timeout', 10) if options else 10
             self.cord_limit = options.get('cord_limit', 5.0) if options else 5.0
@@ -317,6 +323,7 @@ class GeodesicGliderEnv(gym.Env):
             self.glider_state = np.concat((rng.normal(mu_gl,sigma_gl, 2),rng.normal(mu_gl_vel,sigma_gl_vel,2)))
             self.target_state = np.concat((rng.normal(mu_tg,sigma_tg, 2),rng.normal(mu_tg_vel,sigma_tg_vel,2)))
             self.previous_distance = self._calculate_distance(N)
+            self.initial_distance = self.previous_distance
 
             self.rng = rng
             obs = self._get_observation()

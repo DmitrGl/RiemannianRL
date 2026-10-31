@@ -187,6 +187,7 @@ class Sandbox:
         else:
             n_global = self.global_rms.normalize(self.obs["global_state"])
             n_ego = self.ego_rms.normalize(self.obs["ego_features"])
+            n_ego = self.obs["ego_features"]
             obs_vec = np.concatenate([n_local, n_global, n_ego])       # old scheme
 
         with torch.no_grad():
