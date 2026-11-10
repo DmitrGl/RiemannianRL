@@ -1,9 +1,7 @@
 __pycache__/
 wandb/
 *.wandb
-video/
 *.mp4
-*.gif
 *.py[cod]
 .venv/
 venv/

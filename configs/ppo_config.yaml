@@ -15,14 +15,14 @@ training:
 
 environment:
   timeout: 10
-  cord_limit: 7.0
+  cord_limit: 15.0
   maximum_thrust: 30
   complete_region: 0.1
   distance_reward_scale: 10
-  mu_gl: 1
-  sigma_gl: 2
-  mu_tg: 0
-  sigma_tg: 0
+  mu_gl: 2
+  sigma_gl: 1
+  mu_tg: -1
+  sigma_tg: 1
   mu_gl_vel: 0
   sigma_gl_vel: 1
   mu_tg_vel: 0
@@ -32,17 +32,15 @@ environment:
 actor_optimizer:
   lr: 0.0003
   
-  weight_decay: 0.0
+  
 
 critic_optimizer:
   lr: 0.0003
   
-  weight_decay: 0.0
+  
 
 logging:
   log_interval: 30
-  video_interval: 1000
-  save_dir: "./runs"
+  video_interval: 100
   use_wandb: true
-  wandb_project: "riemannian-rl-glider"
-  log_histograms: false
+  
