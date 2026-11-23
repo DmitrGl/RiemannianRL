@@ -42,5 +42,5 @@ critic_optimizer:
 logging:
   log_interval: 30
   video_interval: 100
-  use_wandb: true
+  use_wandb: false
   
